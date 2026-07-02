@@ -773,38 +773,44 @@ class TournamentHub extends React.Component {
     const chapters = {};
 
     allAthletes.forEach(a=>{
-      const isCoach  = a.isCoach === true || a.isCoach === 1 || a.isCoach === "1";
-      const isLoan   = (sport, chCol) => {
-        const playCh = (a[chCol]||"").trim() || a.chapter;
-        return playCh !== a.chapter;
-      };
+      const isCoach = a.isCoach===true||a.isCoach===1||String(a.isCoach)==="1";
+      const homeChapter = (a.chapter||"").trim();
+
       const entries = [
-        {sport:"Basketball", bracket:a.basketball, team:a.teamBasketball,
-         playCh:a.basketballChapter||a.chapter,
-         // Fix 1: always use Coed key for co-ed brackets, never M/F
-         gender: isCoed("Basketball",a.basketball) ? "Coed" : (a.isCoach&&a.coachGender?a.coachGender:a.gender),
-         isLoanEntry: (a.basketballChapter||"").trim() && a.basketballChapter!==a.chapter},
-        {sport:"Soccer", bracket:a.soccer, team:a.teamSoccer,
-         playCh:a.soccerChapter||a.chapter,
-         gender: isCoed("Soccer",a.soccer) ? "Coed" : (a.isCoach&&a.coachGender?a.coachGender:a.gender),
-         isLoanEntry: (a.soccerChapter||"").trim() && a.soccerChapter!==a.chapter},
-        {sport:"Volleyball", bracket:a.volleyball, team:a.teamVolleyball,
-         playCh:a.volleyballChapter||a.chapter,
-         gender: a.isCoach&&a.coachGender?a.coachGender:a.gender,
-         isLoanEntry: (a.volleyballChapter||"").trim() && a.volleyballChapter!==a.chapter},
+        {sport:"Basketball", bracket:(a.basketball||"").trim(),
+         team:(a.teamBasketball||"").trim(),
+         playCh:((a.basketballChapter||"").trim()||homeChapter),
+         isLoanEntry:!!(a.basketballChapter||"").trim()&&(a.basketballChapter||"").trim()!==homeChapter,
+         gender: isCoed("Basketball",(a.basketball||"").trim()) ? "Coed"
+               : (isCoach&&(a.coachGender||"").trim()) ? (a.coachGender||"").trim()
+               : (a.gender||"").trim()},
+        {sport:"Soccer", bracket:(a.soccer||"").trim(),
+         team:(a.teamSoccer||"").trim(),
+         playCh:((a.soccerChapter||"").trim()||homeChapter),
+         isLoanEntry:!!(a.soccerChapter||"").trim()&&(a.soccerChapter||"").trim()!==homeChapter,
+         gender: isCoed("Soccer",(a.soccer||"").trim()) ? "Coed"
+               : (isCoach&&(a.coachGender||"").trim()) ? (a.coachGender||"").trim()
+               : (a.gender||"").trim()},
+        {sport:"Volleyball", bracket:(a.volleyball||"").trim(),
+         team:(a.teamVolleyball||"").trim(),
+         playCh:((a.volleyballChapter||"").trim()||homeChapter),
+         isLoanEntry:!!(a.volleyballChapter||"").trim()&&(a.volleyballChapter||"").trim()!==homeChapter,
+         gender:(isCoach&&(a.coachGender||"").trim())?(a.coachGender||"").trim():(a.gender||"").trim()},
       ];
 
       entries.forEach(({sport,bracket,team,playCh,gender,isLoanEntry})=>{
         if(!bracket||!team) return;
         if(!chapters[playCh]) chapters[playCh]={teams:{},athleteIds:new Set()};
-        // Only count unique athletes for the chapter total if they are home non-coaches
+
+        // Count unique athletes: only home non-coach players
         if(!isCoach && !isLoanEntry) chapters[playCh].athleteIds.add(a.id);
+
         const key=`${sport}||${bracket}||${team}||${gender}`;
         if(!chapters[playCh].teams[key]) chapters[playCh].teams[key]={
           sport,bracket,team,gender,ids:[],homePlayerIds:new Set()
         };
         chapters[playCh].teams[key].ids.push(a.id);
-        // Track home non-coach players separately for ghost team filtering
+        // Home player = registered to this chapter, not a coach, not a loan
         if(!isCoach && !isLoanEntry){
           chapters[playCh].teams[key].homePlayerIds.add(a.id);
         }
@@ -815,18 +821,16 @@ class TournamentHub extends React.Component {
     Object.keys(chapters).forEach(ch=>{
       const chData = chapters[ch];
       const teams = Object.values(chData.teams)
-        // Fix 2: hide teams with no home-chapter non-coach athletes
-        .filter(entry => entry.homePlayerIds.size > 0)
+        // Only show teams that have at least one home non-coach athlete
+        .filter(entry=>entry.homePlayerIds.size>0)
         .map(entry=>{
           const checked=entry.ids.filter(id=>(checkIns[id]||[]).length>0).length;
-          return {...entry, total:entry.ids.length, checked,
-            homeCount: entry.homePlayerIds.size};
+          return {...entry,total:entry.ids.length,checked,homeCount:entry.homePlayerIds.size};
         })
         .sort((a,b)=>a.sport.localeCompare(b.sport)||a.bracket.localeCompare(b.bracket)||a.team.localeCompare(b.team));
 
-      if(teams.length===0) return; // skip chapters with no valid teams
+      if(teams.length===0) return;
 
-      // Unique athletes = home non-coach players only
       result[ch]={
         uniqueAthletes: chData.athleteIds.size,
         uniqueChecked: [...chData.athleteIds].filter(id=>(checkIns[id]||[]).length>0).length,
