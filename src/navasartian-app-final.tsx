@@ -698,35 +698,78 @@ function GBadge({gender,accent,size=28}){
   return <div style={{width:size,height:size,borderRadius:6,background:accent?`${accent}14`:C.surfaceAlt,color:accent||C.soft,display:"flex",alignItems:"center",justifyContent:"center",fontSize:size*.42,fontWeight:700,flexShrink:0,border:`1px solid ${accent?accent+"30":C.border}`}}>{gender==="Male"?"M":"F"}</div>;
 }
 
-// ── GameInput — fully self-contained, zero dependency on parent state ─────────
-class GameInput extends React.Component {
+// ── GamePicker — stable class component OUTSIDE App ──────────────────────────
+// Root cause of the "clears while typing" bug: GamePicker was a function defined
+// INSIDE App. Every App re-render (Sheet poll, rep select, etc) redefined it as
+// a brand new function reference — React treats it as a new component type and
+// UNMOUNTS+REMOUNTS it, destroying any typed text. As a module-level class
+// component it is never recreated. Its internal val state persists forever.
+class GamePicker extends React.Component {
   constructor(props){ super(props); this.state={ val:"" }; }
+
+  handleStart = (label) => {
+    const t = (label||this.state.val||"").trim();
+    if(!t) return;
+    this.props.onStart(t);
+    this.setState({val:""});
+  }
+
   render(){
-    const { onStart, accent } = this.props;
+    const { rep, reps, onRepChange, game, availableGames, accent, colors } = this.props;
     return (
-      <div style={{display:"flex",gap:8,marginTop:10}}>
-        <input
-          value={this.state.val}
-          onChange={e=>this.setState({val:e.target.value})}
-          onKeyDown={e=>{
-            if(e.key==="Enter"&&this.state.val.trim()){
-              onStart(this.state.val.trim());
-              this.setState({val:""});
-            }
-          }}
-          placeholder="Or type a custom game label…"
-          style={{flex:1,padding:"9px 12px",border:"1px solid #D9C28A",borderRadius:7,fontSize:13,outline:"none"}}
-        />
-        <button
-          onClick={()=>{
-            if(this.state.val.trim()){
-              onStart(this.state.val.trim());
-              this.setState({val:""});
-            }
-          }}
-          style={{padding:"9px 16px",background:accent,color:"#fff",border:"none",borderRadius:7,fontSize:13,fontWeight:700,cursor:"pointer"}}>
-          Start
-        </button>
+      <div style={{background:"#FFF6E0",border:"1px solid #F0D9A0",borderRadius:12,padding:"16px 16px 14px",marginBottom:16}}>
+        <div style={{marginBottom:14}}>
+          <p style={{fontSize:13,fontWeight:700,color:"#7A5A0A",margin:"0 0 8px"}}>Who is running this check-in?</p>
+          <select value={rep} onChange={e=>onRepChange(e.target.value)}
+            style={{width:"100%",padding:"10px 12px",border:"1px solid #D9C28A",borderRadius:8,fontSize:14,
+              background:"#fff",outline:"none",fontWeight:rep?700:400,color:rep?colors.ink:colors.faint}}>
+            <option value="">— Select your name —</option>
+            {reps.map(r=><option key={r.name} value={r.name}>{r.name}{r.title?` · ${r.title}`:""}</option>)}
+          </select>
+        </div>
+        <div style={{opacity:rep?1:0.45,pointerEvents:rep?"auto":"none",transition:"opacity .2s"}}>
+          <p style={{fontSize:13,fontWeight:700,color:"#7A5A0A",margin:"0 0 8px"}}>
+            Select the game
+            {!rep&&<span style={{fontSize:11,color:"#B8860B",marginLeft:6,fontWeight:500}}>(select your name first)</span>}
+          </p>
+          {availableGames.length>0?(
+            <div style={{display:"flex",flexDirection:"column",gap:8}}>
+              <select value={game||""} onChange={e=>{ if(e.target.value) this.handleStart(e.target.value); }}
+                style={{width:"100%",padding:"10px 12px",border:`1.5px solid ${game?"#B8860B":"#D9C28A"}`,
+                  borderRadius:8,fontSize:14,fontWeight:game?700:400,
+                  background:"#fff",color:game?colors.ink:colors.faint,outline:"none",
+                  fontFamily:"monospace",cursor:"pointer"}}>
+                <option value="">— Select a game —</option>
+                {availableGames.map(label=><option key={label} value={label}>{label}</option>)}
+              </select>
+              {game&&(
+                <div style={{display:"flex",alignItems:"center",gap:8,background:"rgba(255,255,255,.6)",borderRadius:8,padding:"8px 12px"}}>
+                  <span style={{width:8,height:8,borderRadius:"50%",background:colors.green,flexShrink:0}}/>
+                  <span style={{fontSize:12.5,fontWeight:700,color:colors.ink,fontFamily:"monospace",flex:1}}>{game}</span>
+                  <span style={{fontSize:11,color:colors.green,fontWeight:700}}>Active</span>
+                </div>
+              )}
+            </div>
+          ):(
+            <div style={{background:"rgba(255,255,255,.6)",borderRadius:9,padding:"12px 14px",marginBottom:10}}>
+              <p style={{fontSize:12.5,fontWeight:700,color:"#7A5A0A",margin:"0 0 4px"}}>No games available yet.</p>
+              <p style={{fontSize:12,color:"#9A7A0A",margin:0}}>Type a label below — it appears in the list next time.</p>
+            </div>
+          )}
+          <div style={{display:"flex",gap:8,marginTop:10}}>
+            <input
+              value={this.state.val}
+              onChange={e=>this.setState({val:e.target.value})}
+              onKeyDown={e=>{ if(e.key==="Enter") this.handleStart(); }}
+              placeholder="Or type a custom game label…"
+              style={{flex:1,padding:"9px 12px",border:"1px solid #D9C28A",borderRadius:7,fontSize:13,outline:"none"}}
+            />
+            <button onClick={()=>this.handleStart()}
+              style={{padding:"9px 16px",background:accent,color:"#fff",border:"none",borderRadius:7,fontSize:13,fontWeight:700,cursor:"pointer"}}>
+              Start
+            </button>
+          </div>
+        </div>
       </div>
     );
   }
@@ -1402,55 +1445,6 @@ export default function App(){
     );
   }
 
-  function GamePicker(){
-    return (
-      <div style={{background:C.amber,border:"1px solid #F0D9A0",borderRadius:12,padding:"16px 16px 14px",marginBottom:16}}>
-        <div style={{marginBottom:14}}>
-          <p style={{fontSize:13,fontWeight:700,color:"#7A5A0A",margin:"0 0 8px"}}>Who is running this check-in?</p>
-          <select value={rep} onChange={e=>setRep(e.target.value)}
-            style={{width:"100%",padding:"10px 12px",border:"1px solid #D9C28A",borderRadius:8,fontSize:14,background:"#fff",outline:"none",fontWeight:rep?700:400,color:rep?C.ink:C.faint}}>
-            <option value="">— Select your name —</option>
-            {reps.map(r=><option key={r.name} value={r.name}>{r.name}{r.title?` · ${r.title}`:""}</option>)}
-          </select>
-        </div>
-        <div style={{opacity:rep?1:0.45,pointerEvents:rep?"auto":"none",transition:"opacity .2s"}}>
-          <p style={{fontSize:13,fontWeight:700,color:"#7A5A0A",margin:"0 0 8px"}}>
-            Select the game
-            {!rep&&<span style={{fontSize:11,color:"#B8860B",marginLeft:6,fontWeight:500}}>(select your name first)</span>}
-          </p>
-          {availableGames.length>0?(
-            <div style={{display:"flex",flexDirection:"column",gap:8}}>
-              <select
-                value={game||""}
-                onChange={e=>{ if(e.target.value) startGame(e.target.value); }}
-                style={{width:"100%",padding:"10px 12px",border:`1.5px solid ${game?"#B8860B":"#D9C28A"}`,
-                  borderRadius:8,fontSize:14,fontWeight:game?700:400,
-                  background:"#fff",color:game?C.ink:C.faint,outline:"none",
-                  fontFamily:"monospace",cursor:"pointer"}}>
-                <option value="">— Select a game —</option>
-                {availableGames.map(label=>(
-                  <option key={label} value={label}>{label}</option>
-                ))}
-              </select>
-              {game&&(
-                <div style={{display:"flex",alignItems:"center",gap:8,background:"rgba(255,255,255,.6)",borderRadius:8,padding:"8px 12px"}}>
-                  <span style={{width:8,height:8,borderRadius:"50%",background:C.green,flexShrink:0}}/>
-                  <span style={{fontSize:12.5,fontWeight:700,color:C.ink,fontFamily:"monospace",flex:1}}>{game}</span>
-                  <span style={{fontSize:11,color:C.green,fontWeight:700}}>Active</span>
-                </div>
-              )}
-            </div>
-          ):(
-            <div style={{background:"rgba(255,255,255,.6)",borderRadius:9,padding:"12px 14px",marginBottom:10}}>
-              <p style={{fontSize:12.5,fontWeight:700,color:"#7A5A0A",margin:"0 0 4px"}}>No games available yet.</p>
-              <p style={{fontSize:12,color:"#9A7A0A",margin:0}}>Type a custom label below — it'll appear in this list next time.</p>
-            </div>
-          )}
-          <GameInput onStart={startGame} accent={T.accent}/>
-        </div>
-      </div>
-    );
-  }
 
   function RosterView(){
     return (
@@ -1470,7 +1464,16 @@ export default function App(){
             <button style={{...Btn("#fff",C.ink),border:`1px solid ${C.border}`,padding:"7px 12px",fontSize:12.5}} onClick={()=>setView("history")}>History</button>
           </div>
         </div>
-        {!game?<GamePicker/>:(
+        {!game?<GamePicker
+          rep={rep}
+          reps={reps}
+          onRepChange={setRep}
+          game={game}
+          availableGames={availableGames}
+          accent={T.accent}
+          colors={C}
+          onStart={startGame}
+        />:(
           <>
             <div style={{background:T.dark,borderRadius:12,padding:"12px 16px",marginBottom:14,display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
               <div style={{display:"flex",alignItems:"center",gap:10}}>
