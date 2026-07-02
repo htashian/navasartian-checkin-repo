@@ -771,31 +771,66 @@ class TournamentHub extends React.Component {
   getOverview(){
     const { allAthletes, checkIns } = this.props;
     const chapters = {};
+
     allAthletes.forEach(a=>{
+      const isCoach  = a.isCoach === true || a.isCoach === 1 || a.isCoach === "1";
+      const isLoan   = (sport, chCol) => {
+        const playCh = (a[chCol]||"").trim() || a.chapter;
+        return playCh !== a.chapter;
+      };
       const entries = [
-        {sport:"Basketball", bracket:a.basketball, team:a.teamBasketball, playCh:a.basketballChapter||a.chapter, gender:a.gender},
-        {sport:"Soccer",     bracket:a.soccer,     team:a.teamSoccer,     playCh:a.soccerChapter||a.chapter,     gender:isCoed("Soccer",a.soccer)?"Coed":a.gender},
-        {sport:"Volleyball", bracket:a.volleyball, team:a.teamVolleyball, playCh:a.volleyballChapter||a.chapter, gender:a.gender},
+        {sport:"Basketball", bracket:a.basketball, team:a.teamBasketball,
+         playCh:a.basketballChapter||a.chapter,
+         // Fix 1: always use Coed key for co-ed brackets, never M/F
+         gender: isCoed("Basketball",a.basketball) ? "Coed" : (a.isCoach&&a.coachGender?a.coachGender:a.gender),
+         isLoanEntry: (a.basketballChapter||"").trim() && a.basketballChapter!==a.chapter},
+        {sport:"Soccer", bracket:a.soccer, team:a.teamSoccer,
+         playCh:a.soccerChapter||a.chapter,
+         gender: isCoed("Soccer",a.soccer) ? "Coed" : (a.isCoach&&a.coachGender?a.coachGender:a.gender),
+         isLoanEntry: (a.soccerChapter||"").trim() && a.soccerChapter!==a.chapter},
+        {sport:"Volleyball", bracket:a.volleyball, team:a.teamVolleyball,
+         playCh:a.volleyballChapter||a.chapter,
+         gender: a.isCoach&&a.coachGender?a.coachGender:a.gender,
+         isLoanEntry: (a.volleyballChapter||"").trim() && a.volleyballChapter!==a.chapter},
       ];
-      entries.forEach(({sport,bracket,team,playCh,gender})=>{
+
+      entries.forEach(({sport,bracket,team,playCh,gender,isLoanEntry})=>{
         if(!bracket||!team) return;
         if(!chapters[playCh]) chapters[playCh]={teams:{},athleteIds:new Set()};
-        chapters[playCh].athleteIds.add(a.id);
+        // Only count unique athletes for the chapter total if they are home non-coaches
+        if(!isCoach && !isLoanEntry) chapters[playCh].athleteIds.add(a.id);
         const key=`${sport}||${bracket}||${team}||${gender}`;
-        if(!chapters[playCh].teams[key]) chapters[playCh].teams[key]={sport,bracket,team,gender,ids:[]};
+        if(!chapters[playCh].teams[key]) chapters[playCh].teams[key]={
+          sport,bracket,team,gender,ids:[],homePlayerIds:new Set()
+        };
         chapters[playCh].teams[key].ids.push(a.id);
+        // Track home non-coach players separately for ghost team filtering
+        if(!isCoach && !isLoanEntry){
+          chapters[playCh].teams[key].homePlayerIds.add(a.id);
+        }
       });
     });
+
     const result={};
     Object.keys(chapters).forEach(ch=>{
       const chData = chapters[ch];
+      const teams = Object.values(chData.teams)
+        // Fix 2: hide teams with no home-chapter non-coach athletes
+        .filter(entry => entry.homePlayerIds.size > 0)
+        .map(entry=>{
+          const checked=entry.ids.filter(id=>(checkIns[id]||[]).length>0).length;
+          return {...entry, total:entry.ids.length, checked,
+            homeCount: entry.homePlayerIds.size};
+        })
+        .sort((a,b)=>a.sport.localeCompare(b.sport)||a.bracket.localeCompare(b.bracket)||a.team.localeCompare(b.team));
+
+      if(teams.length===0) return; // skip chapters with no valid teams
+
+      // Unique athletes = home non-coach players only
       result[ch]={
         uniqueAthletes: chData.athleteIds.size,
         uniqueChecked: [...chData.athleteIds].filter(id=>(checkIns[id]||[]).length>0).length,
-        teams: Object.values(chData.teams).map(entry=>{
-          const checked=entry.ids.filter(id=>(checkIns[id]||[]).length>0).length;
-          return {...entry,total:entry.ids.length,checked};
-        }).sort((a,b)=>a.sport.localeCompare(b.sport)||a.bracket.localeCompare(b.bracket)||a.team.localeCompare(b.team)),
+        teams,
       };
     });
     return result;
@@ -1180,7 +1215,7 @@ export default function App(){
     const base = search.trim()
       ? roster.filter(a=>a.name.toLowerCase().includes(search.toLowerCase())||String(a.age).includes(search))
       : roster;
-    // Coaches always appear first, then players alphabetically
+    // Fix 3: coaches A-Z first, then players A-Z
     return [...base].sort((a,b)=>{
       if(a.isCoach && !b.isCoach) return -1;
       if(!a.isCoach && b.isCoach) return 1;
