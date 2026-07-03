@@ -661,6 +661,7 @@ function parseScheduleRows(rows){
       gender:    String(r.gender   ||r.E||""),
       year:      String(r.year     ||r.F||"2026"),
       sortOrder: Number(r.sortOrder||r.G||999),
+      matchup:   String(r.matchup  ||r.H||""),
     }))
     .filter(r=>r.label && r.label.toLowerCase()!=="label")
     .sort((a,b)=>a.sortOrder-b.sortOrder||a.label.localeCompare(b.label));
@@ -705,17 +706,34 @@ function GBadge({gender,accent,size=28}){
 // UNMOUNTS+REMOUNTS it, destroying any typed text. As a module-level class
 // component it is never recreated. Its internal val state persists forever.
 class GamePicker extends React.Component {
-  constructor(props){ super(props); this.state={ val:"" }; }
+  constructor(props){
+    super(props);
+    this.state={ val:"", dropdownOpen:false };
+    this.frozenGames = null;
+  }
+
+  // Block ALL re-renders while the dropdown is open.
+  // This is the core fix — the browser closes <select> option lists
+  // whenever the DOM element is touched by a React re-render.
+  // Returning false here freezes the component completely until the
+  // user either selects a game or clicks away.
+  shouldComponentUpdate(nextProps, nextState){
+    if(this.state.dropdownOpen) return false;
+    return true;
+  }
 
   handleStart = (label) => {
     const t = (label||this.state.val||"").trim();
     if(!t) return;
     this.props.onStart(t);
-    this.setState({val:""});
+    this.setState({val:"", dropdownOpen:false});
+    this.frozenGames = null;
   }
 
   render(){
     const { rep, reps, onRepChange, game, availableGames, accent, colors } = this.props;
+    // While dropdown is open, serve the frozen snapshot so no re-render touches it
+    const games = (this.state.dropdownOpen && this.frozenGames) ? this.frozenGames : availableGames;
     return (
       <div style={{background:"#FFF6E0",border:"1px solid #F0D9A0",borderRadius:12,padding:"16px 16px 14px",marginBottom:16}}>
         <div style={{marginBottom:14}}>
@@ -732,15 +750,29 @@ class GamePicker extends React.Component {
             Select the game
             {!rep&&<span style={{fontSize:11,color:"#B8860B",marginLeft:6,fontWeight:500}}>(select your name first)</span>}
           </p>
-          {availableGames.length>0?(
+          {games.length>0?(
             <div style={{display:"flex",flexDirection:"column",gap:8}}>
-              <select value={game||""} onChange={e=>{ if(e.target.value) this.handleStart(e.target.value); }}
+              <select
+                value={game||""}
+                onFocus={()=>{
+                  this.frozenGames = [...availableGames];
+                  this.setState({dropdownOpen:true});
+                }}
+                onBlur={()=>{
+                  this.setState({dropdownOpen:false});
+                  this.frozenGames = null;
+                }}
+                onChange={e=>{
+                  this.setState({dropdownOpen:false});
+                  this.frozenGames = null;
+                  if(e.target.value) this.handleStart(e.target.value);
+                }}
                 style={{width:"100%",padding:"10px 12px",border:`1.5px solid ${game?"#B8860B":"#D9C28A"}`,
                   borderRadius:8,fontSize:14,fontWeight:game?700:400,
                   background:"#fff",color:game?colors.ink:colors.faint,outline:"none",
                   fontFamily:"monospace",cursor:"pointer"}}>
                 <option value="">— Select a game —</option>
-                {availableGames.map(label=><option key={label} value={label}>{label}</option>)}
+                {games.map(label=><option key={label} value={label}>{label}</option>)}
               </select>
               {game&&(
                 <div style={{display:"flex",alignItems:"center",gap:8,background:"rgba(255,255,255,.6)",borderRadius:8,padding:"8px 12px"}}>
@@ -1300,6 +1332,29 @@ export default function App(){
   const checkedN = game?roster.filter(a=>isIn(a.id)).length:0;
   const pct      = roster.length?Math.round(checkedN/roster.length*100):0;
 
+  // All chapters that have home players in the same sport/bracket/gender —
+  // used to power the "Switch team" dropdown on the roster screen.
+  const eligibleChapters = useMemo(()=>{
+    if(!sport||!bracket||!gender||!team) return [];
+    const sk = sport.toLowerCase();
+    const coed = isCoed(sport,bracket);
+    const seen = new Set();
+    allAthletes.forEach(a=>{
+      if(a.isCoach) return;
+      const b   = sk==="basketball"?a.basketball:sk==="soccer"?a.soccer:a.volleyball;
+      const tm  = sk==="basketball"?a.teamBasketball:sk==="soccer"?a.teamSoccer:a.teamVolleyball;
+      const ch  = sk==="basketball"?a.basketballChapter:sk==="soccer"?a.soccerChapter:a.volleyballChapter;
+      const playCh = (ch||"").trim()||a.chapter;
+      const isLoan = (ch||"").trim() && ch!==a.chapter;
+      if(isLoan) return; // only count home players
+      if(b!==bracket||tm!==team) return;
+      if(!coed && a.gender!==gender) return;
+      if(playCh===chapter) return; // exclude current chapter
+      seen.add(playCh);
+    });
+    return [...seen].sort();
+  },[allAthletes,sport,bracket,gender,team,chapter]);
+
   function toast2(msg,color){ setToast({msg,color}); setTimeout(()=>setToast(null),2400); }
 
   function startGame(lbl){
@@ -1487,6 +1542,26 @@ export default function App(){
               </div>
             </div>
             <div style={{background:C.surfaceAlt,borderRadius:8,height:8,marginBottom:12,overflow:"hidden"}}><div style={{width:`${pct}%`,height:"100%",background:T.accent,transition:"width .3s"}}/></div>
+            {eligibleChapters.length>0&&(
+              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
+                <span style={{fontSize:12,fontWeight:600,color:C.soft,flexShrink:0}}>Switch team:</span>
+                <select
+                  value=""
+                  onChange={e=>{
+                    if(!e.target.value) return;
+                    setChapter(e.target.value);
+                    setSearch("");
+                    setView("roster");
+                  }}
+                  style={{flex:1,padding:"7px 10px",border:`1px solid ${C.border}`,borderRadius:8,
+                    fontSize:13,background:C.surface,outline:"none",cursor:"pointer",color:C.ink}}>
+                  <option value="">— Other {bracket} {sport}{isCoed(sport,bracket)?"":" "+gender} chapters —</option>
+                  {eligibleChapters.map(ch=>(
+                    <option key={ch} value={ch}>{ch}</option>
+                  ))}
+                </select>
+              </div>
+            )}
             <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap",alignItems:"center"}}>
               {checkedN===roster.length&&roster.length>0&&(
                 <>
@@ -1499,6 +1574,7 @@ export default function App(){
                 <button onClick={()=>setModal({title:`Check in all ${roster.length-checkedN} remaining?`,sub:"Marks everyone not yet present.",onOk:()=>{checkInAll();setModal(null);},danger:false})}
                   style={{...Btn(T.accent),padding:"6px 14px",fontSize:12}}>Check in all remaining</button>
               )}
+
             </div>
           </>
         )}
